@@ -51,9 +51,72 @@ double osc(double hz, double dtime, type t) {
 	}
 }
 
+
+struct envelopeADSR {
+	double at, dt, sustain, rt,startAmp,triggerOn,triggerOFF;
+	bool isNoteOn;
+
+	envelopeADSR() {
+		at = 0.500;
+		dt = 0.01;
+		startAmp = 1.0;
+		sustain = 0.8;
+		rt = 0.700;
+		triggerOn = 0.0;
+		triggerOFF = 0.0;
+		isNoteOn = false;
+	}
+
+	double getAmp(double dtime) {
+		double ampl = 0.0;
+		double lifeTime = dtime - triggerOn;
+
+		if (isNoteOn) {
+			//ADS
+
+			//attack
+			if (lifeTime <= at) {
+				ampl = (lifeTime / at) * startAmp;
+			}
+
+			//decay
+			if (lifeTime > at && lifeTime <= (at+dt)) {
+				ampl = ((lifeTime - at) / dt) * (sustain-startAmp)+startAmp;
+
+			}
+
+			if (lifeTime > (at + dt)) {
+				ampl = sustain;
+			}
+		}
+		else {
+			//R
+			ampl = ((dtime - triggerOFF) / rt) * (0.0 - sustain) + sustain;
+		}
+		if (ampl <= 0.0001)
+			ampl = 0.0;
+
+		return ampl;
+	}
+
+	void noteOn(double timeON) {
+		triggerOn = timeON;
+		isNoteOn = true;
+	}
+
+	void noteOff(double timeOFF) {
+		triggerOFF = timeOFF;
+		isNoteOn = false;
+	}
+};
+
+
+envelopeADSR e;
+
 double makeNoise(double dtime) {
-	return osc(freqOutput, dtime, TRIANGLE_WAVE) * 0.4;
+	return e.getAmp(dtime)*osc(freqOutput, dtime, TRIANGLE_WAVE) * 0.4;
 }
+
 
 int main() {
 
@@ -79,6 +142,7 @@ int main() {
 			if (GetAsyncKeyState((unsigned char)("ZSXCFVGBNJMK\xbc\xbe\xbf"[k])) & 0x8000){
 				if (currKey != k) {
 					freqOutput = octaveFreq * pow(d12thRootOf2, k);
+					e.noteOn(sound.GetTime());
 					wcout << "\rNote On : " << sound.GetTime() << "s " << freqOutput << "Hz";
 					currKey = k;
 				}
@@ -91,10 +155,10 @@ int main() {
 			if (currKey != -1)
 			{
 				wcout << "\rNote Off: " << sound.GetTime() << "s                        ";
+				e.noteOff(sound.GetTime());
 				currKey = -1;
 			}
 
-			freqOutput = 0.0;
 		}
 	}
 
