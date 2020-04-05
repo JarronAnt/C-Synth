@@ -1,4 +1,3 @@
-//This file is just a tempalate class that allows you to hook into your sound devices
 
 #pragma once
 #pragma comment(lib, "winmm.lib")
@@ -12,6 +11,7 @@
 #include <atomic>
 #include <condition_variable>
 using namespace std;
+#define FTYPE double
 
 #include <Windows.h>
 
@@ -107,12 +107,12 @@ public:
 	}
 
 	// Override to process current sample
-	virtual double UserProcess(double dTime)
+	virtual FTYPE UserProcess(int channel, FTYPE dtime)
 	{
 		return 0.0;
 	}
 
-	double GetTime()
+	FTYPE GetTime()
 	{
 		return m_dGlobalTime;
 	}
@@ -131,12 +131,12 @@ public:
 		return sDevices;
 	}
 
-	void SetUserFunction(double(*func)(double))
+	void SetUserFunction(FTYPE(*func)(int,FTYPE))
 	{
 		m_userFunction = func;
 	}
 
-	double clip(double dSample, double dMax)
+	FTYPE clip(FTYPE dSample, FTYPE dMax)
 	{
 		if (dSample >= 0.0)
 			return fmin(dSample, dMax);
@@ -146,7 +146,7 @@ public:
 
 
 private:
-	double(*m_userFunction)(double);
+	FTYPE(*m_userFunction)(int,FTYPE);
 
 	unsigned int m_nSampleRate;
 	unsigned int m_nChannels;
@@ -164,7 +164,7 @@ private:
 	condition_variable m_cvBlockNotZero;
 	mutex m_muxBlockNotZero;
 
-	atomic<double> m_dGlobalTime;
+	atomic<FTYPE> m_dGlobalTime;
 
 	// Handler for soundcard request for more data
 	void waveOutProc(HWAVEOUT hWaveOut, UINT uMsg, DWORD dwParam1, DWORD dwParam2)
@@ -189,11 +189,11 @@ private:
 	void MainThread()
 	{
 		m_dGlobalTime = 0.0;
-		double dTimeStep = 1.0 / (double)m_nSampleRate;
+		FTYPE dtimeStep = 1.0 / (FTYPE)m_nSampleRate;
 
-		// hack to get maximum integer for a type at run-time
+		// Goofy hack to get maximum integer for a type at run-time
 		T nMaxSample = (T)pow(2, (sizeof(T) * 8) - 1) - 1;
-		double dMaxSample = (double)nMaxSample;
+		FTYPE dMaxSample = (FTYPE)nMaxSample;
 		T nPreviousSample = 0;
 
 		while (m_bReady)
@@ -215,17 +215,21 @@ private:
 			T nNewSample = 0;
 			int nCurrentBlock = m_nBlockCurrent * m_nBlockSamples;
 
-			for (unsigned int n = 0; n < m_nBlockSamples; n++)
+			for (unsigned int n = 0; n < m_nBlockSamples; n += m_nChannels)
 			{
 				// User Process
-				if (m_userFunction == nullptr)
-					nNewSample = (T)(clip(UserProcess(m_dGlobalTime), 1.0) * dMaxSample);
-				else
-					nNewSample = (T)(clip(m_userFunction(m_dGlobalTime), 1.0) * dMaxSample);
+				for (unsigned int c = 0; c < m_nChannels; c++)
+				{
+					if (m_userFunction == nullptr)
+						nNewSample = (T)(clip(UserProcess(c, m_dGlobalTime), 1.0) * dMaxSample);
+					else
+						nNewSample = (T)(clip(m_userFunction(c, m_dGlobalTime), 1.0) * dMaxSample);
 
-				m_pBlockMemory[nCurrentBlock + n] = nNewSample;
-				nPreviousSample = nNewSample;
-				m_dGlobalTime = m_dGlobalTime + dTimeStep;
+					m_pBlockMemory[nCurrentBlock + n + c] = nNewSample;
+					nPreviousSample = nNewSample;
+				}
+
+				m_dGlobalTime = m_dGlobalTime + dtimeStep;
 			}
 
 			// Send block to sound device
